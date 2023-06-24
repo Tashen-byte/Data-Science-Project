@@ -1,0 +1,316 @@
+---
+title: "IPL Project"
+author: "Tashen Naidoo"
+date: "2023-06-24"
+output: pdf_document
+editor_options: 
+  markdown: 
+    wrap: sentence
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# The Indian Premiere League
+
+The Indian Premiere League (IPL) is the biggest cricket league in the world and second biggest across all global sports.
+This competition is also one of the most viewed events, with this year's competition accumulating nearly 500 million views.
+It is without a doubt one of the most exhilarating competitions globally, as it offers spectators the opportunity to watch the best players in the world face each other.\
+The IPL has revolutionised the T20 format of the game and has changed the livelihoods of players.
+This is due to their financial system (auction process), which ensures that the player and the player's nation is compensated.
+This further helps with cricket development worldwide.
+Since its inception in 2008, the IPL has provided unparalleled entertainment for all cricket fans and helps young cricket players be exposed to international talent.
+As a cricket fan, and an IPL fan, I have decided to attempt to model the team's point outcome per season based on their past performances.
+
+## Intention
+
+I intend to formulate a model that can predict the final points of a team for each season.
+There have mainly been 14 games per season, with the exception of 2012 having 16, meaning that each team can score a maximum of 28 points per season (36 in 2012), if they win all of their matches.
+Losing teams receive no points and games ending in a draw result in each team receiving 1 point.
+Scoring more points does not mean that a team wins the league, but the top four teams have the opportunity to win the tournament by competing in the play-off rounds.
+I intend to only formulate a model that predicts the team points for each season.
+However, the first step is to attain the relevant data.
+
+# Data
+
+All data in this project has been sourced from Kaggle.
+Two data sets were utilised, as I wanted to add more variables to the *points* data set.
+These data sets first needed to be investigated, to ensure that they are reliable, and then sanitised before performing any supervised learning techniques.
+The variables included in the model are:
+
+-   season: provides the season year of the competition.
+
+-   rank: indicates the position that the team finished in each table.
+
+-   name: indicates the team's name.
+
+-   matchesplayed: the total number of games each team has played per season.
+
+-   matcheswon: the total number of games won by a team.
+
+-   matcheslost: the total number of games lost by a team.
+
+-   noresults: the total number of matches ended in a tie/draw.
+
+-   matchpoints: the total number of match points gained by a team.
+
+-   nrr: the net run rate per team.
+    This variable indicates the difference in average runs scored per over for a team and the average runs per over scored against a team.
+    It is essentially a performance indicator for the team and is used to differentiate team ranks when teams have the same amount of points.
+
+-   toss_prop: the proportion of toss decisions won by the team.
+
+Since the commencement of the IPL, there has been 16 teams throughout the competition in the *points* data set.
+However, upon further investigation, there have been 18 teams across all IPL competitions - and the *all_match* data set also confirms this.
+This raises concern, as there are generally only 8 registered teams per season, meaning that the teams are constantly changing, which raises a concern for a predictive model.
+The data sets are adjusted as follows:
+
+## Points data set
+
+This data set indicates the the amount of points, matches won, matches lost, matches drawn, net run rate, and rank of teams for seasons from 2008-2022.
+This is the main data set used for the model, as it contains most of the appropriate information required to predict a team's point outcome.
+
+## All Match data set
+
+This data set contains the information contains games on IPL seasons ranging from 2008-2022.
+The variable of interest here is *toss_winner*, as I believe that it influences the probability of a team winning, which leads to more points acquired.
+This will be discussed later.
+
+## Altering the data
+
+Team changes over the years.
+Deccan Chargers represents Hyderabad, a city in Indian, but unfortunately went bankrupt in 2012.
+The city is now represented by Sunrisers Hyderabad, but they are not a replacement for the Deccan Chargers.
+The Kochi Tuskers Kerala only existed for one season in the IPL (2011).
+In 2016/17, the Chennai Super Kings and Rajasthan Royals did not compete, as they were suspended over alleged illegal betting.
+This gave rise to the Rising Pune Supergiants and Gujarat Lions, who were disbanded once Chennai Super Kings and Rajasthan Royals re-entered the competition.
+The only IPL team name changes throughout the years have been Dehli Daredevils to Dehli Capitals and more recently Kings XI Punjab to Punjab Kings.
+It is important to note that these teams are the same, and only differ in name, so they should be treated the same.
+These changes had a significant impact on trying to create a predictive model with teams that are not present.
+Therefore, a criteria is needed for which teams are going to be included in the model.
+
+```{r}
+source("code/data_load.R")
+#Points data set adjustment
+points <- read_csv2("data/Points.csv") %>%
+    janitor::clean_names() %>%
+    mutate(rank = as.factor(rank)) %>%
+    mutate(season = as.character(season)) %>%
+    mutate(nrr = as.numeric(nrr)) %>%
+    mutate(name = gsub("Kings XI Punjab", "Punjab Kings", name))
+
+#All Match data set adjustment
+all_match <- read_csv2("data/matches.csv") %>%
+    janitor::clean_names() %>%
+    mutate(season = case_when(season == "2020/21" ~ "2020",
+                              season == "Oct-09" ~ "2010",
+                              season == "Aug-07" ~ "2008",
+                              TRUE ~ season),
+           season = as.character(season)) %>%
+    mutate(toss_winner = case_when(toss_winner == "Delhi Daredevils" ~ "Delhi Capitals",
+                                   toss_winner == "Kings XI Punjab" ~ "Punjab Kings",
+                                   toss_winner == "Rising Pune Supergiants" ~ "Rising Pune Supergiant",
+                                   TRUE ~ toss_winner),
+           toss_winner = as.character(toss_winner))
+```
+
+Now that the data has been loaded and transformed, the coin toss winner needs to be added.
+The toss decision in a game impacts the chances of the team wining the game.
+As with most sports, teams evaluate their opponent before they face each other.
+In cricket, a team might have a higher losing percentage when they don't get to bat first, or when they don't get to bowl first.
+This decision is made prior to the game with a coin toss.
+However, this can influence the teams chance of winning a game, especially if their opponent knows their weakness.
+
+However, the impact of the coin toss decision goes beyond the simple analysis that teams have on each other.
+Weather plays an important role in the game.
+Weather conditions may make it favourable for a team to bowl first as overcast conditions cause the ball movement to vary greatly and make it more difficult for the batsman to retain their wicket, which essentially leads to more wickets and less runs.
+If conditions are dry and hot, teams will want to win the toss and elect to bat first, as the ball movement won't vary much, making it easier to protect your wicket, and the ball will move quicker off the bat leading to a higher score for the opposing team to chase.
+This dynamic makes it advantageous for a team to win the toss, they can elect to either bat/bowl based on several factors that give them the best chance of winning.
+With this being an important variable, I will need to calculate the coin toss win percentage per team using the *all_matches* data set and add it too the *points* data set.
+
+```{r}
+source("code/toss_win_percentage.R")
+t <- toss_win(all_match)
+#add to the points data set
+data <- points %>%
+    left_join(t) %>%
+ select(-'for', - against)
+data
+```
+
+The *for* and *against* variables can be ignored, as they are the odds that a team will be on top of the league for each season.
+Now that the data sets are joined and sanitised, I am able to select the teams for the model.
+
+## Data selection
+
+Since the appropriate changes have been made to the data set, I now want to look at the most consistent teams in all seasons of the competition.
+I intend to split the data 70/30 (training/testing), which means that just under 10 seasons will be used in the training data.
+This suggests that teams that are present in at least 8 seasons of the IPL are used.
+
+```{r}
+source("code/team_selection.R")
+tt <- persistent(data)
+tt
+```
+
+This indicates the 7 teams that are most consistent throughout the IPL.
+These are the teams that need for the model, so the data set needs to be filtered using their short-name in *data*.
+
+```{r}
+data <-  data %>% 
+    filter(name %in% c("Rajasthan Royals","Chennai Super Kings","Punjab Kings", "Delhi Capitals", "Kolkata Knight Riders","Mumbai Indians","Royal Challengers Bangalore"))
+dim(points)
+dim(data)
+```
+
+The data has been reduced, but not by much and therefore should not affect the models outcome.
+However, I will find out if this affects the model or not by doing tests on both.
+
+# Model set-up
+
+The *matchpoints* of each team at the end of the season will be the the *Target variable* of the model.
+All of the variables described above will be used in the model, except for the team rank.
+This variable is excluded as it is determined by the number of points a team accumulates each season.
+
+## Splitting and Model Evaluation
+
+The data will be split 70 (training) and 30 (test) utilising the random sampling method.
+This method is preferred to the stratified sampling, as it does not require each sample to have the same characteristics, since the target variable outcome is based on differences in each team.
+
+```{r}
+source("code/splitting_and_modelling.R")
+g <- fit1(data)
+g
+```
+
+The above is used on the restricted data set, and indicates that the optimal k-fold level is when k=2.
+Here we have the lowest RMSE present and a great deal of the variation in the outcome is explained by the model (R-squared).
+However, I would like to compare this result to the unrestricted model.
+This contains the entire IPL point data set, with no threshold of minimum season requirements.
+
+```{r}
+#I need to work with the sanitised data sets and join them.
+source("code/toss_win_percentage.R")
+t <- toss_win(all_match)
+points
+dat <- points %>% 
+    left_join(t) %>% 
+     select(-'for', - against)
+#split and fit the model
+source("code/alt_fit.R")
+fit2(dat)
+```
+
+The unrestricted model appears to have a lower RMSE than the restricted data set.
+Therefore, this data set must be carried forward.
+
+# Engineering
+
+I need to assess the model and make the necessary changes to improve the RMSE of the model.
+Each of the steps that follow is to improve the model, by investigating the variables in the model.
+
+## Missing data?
+
+```{r}
+colSums(is.na(dat))
+```
+
+No data is missing from this data set.
+Now the variance of each variable needs to be assessed.
+
+```{r}
+#variance test
+    library(caret)
+    library(rsample)
+    (set.seed(123))
+    split1 <- initial_split(dat, prop = 0.7, strata = "matchpoints")
+    train1 <- training(split1)
+    test1 <- testing(split1)
+
+caret::nearZeroVar(train1, saveMetrics = TRUE) %>% 
+    tibble::rownames_to_column() %>% 
+    filter(nzv)
+```
+
+This result indicates that all the variables should remain in the model, as the variance in each is what is influencing the target.
+This is no surprise, as the variables in the model are all included due to their impact on the position of the team at the end of each season.
+
+All of the predictor variables are numeric, so it would be wise to normalise the distribution of the data.
+Now the distribution of each variable should be examined.
+
+```{r}
+#Matches won and lost
+source("code/box.R")
+box(dat)
+```
+
+```{r}
+#Net run rate
+source("code/box.R")
+box1(dat)
+```
+
+```{r}
+#Proportion of coin tosses won
+source("code/box.R")
+box2(dat)
+```
+
+The spread of the data does not vary too much, but the proportion does.
+However, all variables will be normalised using the recipes package.
+This will all be accounted for in the next step.
+
+## Model evaluation
+
+Since there is no missing data and variance is present, all the variables will help the model.
+The distribution of each variable differs, as seen above.
+This means that it is probably best to standardise the variables, which will improve the model overall.
+
+Now I will apply all of these steps in one chunk and evaluate the model.
+
+```{r}
+library(recipes)
+blue <- recipe(matchpoints ~ matcheswon+matcheslost+noresult+
+                      nrr+proportion, data = train1) %>% 
+    step_nzv(all_nominal()) %>%
+    step_center(all_numeric(), - all_outcomes()) %>% 
+    step_scale(all_numeric(), -all_outcomes()) 
+#resample
+c <- trainControl(method = "repeatedcv",
+                  number = 10, 
+                  repeats = 5)
+hgrid <- expand.grid(k = seq(2, 25, by = 1))
+knn <- train(blue, 
+             data = train1, 
+             method = "knn", 
+             trControl = c,
+             tuneGrid = hgrid,
+             metric = "RMSE")
+ggplot(knn)
+```
+
+This shows that the the RMSE has been lowered, which means that the model has been improved.
+The steps implemented have resulted in a better model.
+Lets test this on the test data.
+
+```{r}
+prepr <- prep(blue, training = train1)
+prepr
+```
+
+Now I am able to apply this to the test data.
+
+```{r}
+baked <- bake(prepr, new_data = train1)
+baked_t <- bake(prepr, new_data = test1)
+baked
+baked_t
+```
+
+This shows that the model has improved.
+A concern is that I am not able view the team name and season, and not sure how to incorporate this into the model.
+
+The addition of different variables may have a strong impact on the models ability to predict the team points per season, such as average wickets per season.
+This model is limited by the data available.
+However, I believe that the methodology followed provides a good foundation for predicting the team points per season in the IPL.
